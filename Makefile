@@ -1,7 +1,7 @@
 FC = gfortran
 # flags for debugging or for maximum performance, comment as necessary
-FCFLAGS = -g -fcheck-bounds
-FCFLAGS = -O2
+FCFLAGS = -g -fcheck=all
+FCFLAGS = -g -O2
 # flags forall (look for system .mod files required in gfortran)
 FCFLAGS += -I/usr/include
 
