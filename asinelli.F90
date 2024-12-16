@@ -5,8 +5,8 @@ INTEGER,PARAMETER :: wp=KIND(1.0), vers=1
 
 TYPE layer_t
   PRIVATE
-  TYPE(layer_t),POINTER :: next=>NULL()
-  INTEGER :: ninp=0, nout=0, ninconn=0
+  TYPE(layer_t),POINTER,PUBLIC :: next=>NULL()
+  INTEGER,PUBLIC :: ninp=0, nout=0, ninconn=0
   REAL(kind=wp),ALLOCATABLE :: w(:,:), b(:)
   INTEGER,ALLOCATABLE :: inconnstart(:), inconnend(:)
   CONTAINS
@@ -26,30 +26,77 @@ INTEGER :: ninp, nout, ninconn
 NAMELIST/layer_def/ninp, nout, ninconn
 
 TYPE nnet_t
+  PRIVATE
   TYPE(layer_t),POINTER :: firstlayer=>NULL()
+  INTEGER,PUBLIC :: nlayer=0, nmaxio=0, ninp=0, nout=0
+  REAL(kind=wp),ALLOCATABLE ::  buff1(:), buff2(:)
+  CONTAINS
+  GENERIC :: init=>nnet_t_init
+  PROCEDURE,PRIVATE :: nnet_t_init
+!  GENERIC :: compute=>nnet_t_compute
+!  PROCEDURE,PRIVATE :: nnet_t_compute
+!  GENERIC :: display=>nnet_t_display
+!  PROCEDURE,PRIVATE :: nnet_t_display
+!  GENERIC :: write_to_file=>nnet_t_write_to_file
+!  PROCEDURE,PRIVATE :: nnet_t_write_to_file
 END TYPE nnet_t
 
+INTEGER :: nlayer
+NAMELIST/nnet_def/nlayer
 
 CONTAINS
 
-SUBROUTINE layer_t_init(this, unit, namlfile, deffile)
-CLASS(layer_t),INTENT(out) :: this
+SUBROUTINE nnet_t_init(this, next, unit)
+CLASS(nnet_t),INTENT(out) :: this
 INTEGER,INTENT(in),OPTIONAL :: unit
-CHARACTER(len=*),INTENT(in),OPTIONAL :: namlfile
+
+TYPE(layer_t),POINTER :: curr, next
+INTEGER :: i, ierr
+
+IF (PRESENT(unit)) THEN
+  READ(unit, nml=nnet_def, iostat=ierr)
+  ALLOCATE(this%firstlayer)
+
+  this%nlayer = nlayer
+  curr => this%firstlayer
+  DO i = 1, nlayer
+    IF (i == 1) THEN
+      thix%nin = curr%nin
+    ENDIF
+    IF (i < nlayer) THEN
+      CALL curr%init(next, unit=unit)
+    ELSE
+      CALL curr%init(unit=unit)
+      this%nout = curr%nout
+    ENDIF
+    IF (.NOT.ASSOCIATED(next)) THEN
+      CALL pflow_error('nnet_init: end of file reading layer namelist')
+    ENDIF
+    this%nmaxio = MAX(this%nmaxio, curr%ninp, curr%nout)
+    curr => next
+  ENDDO
+ENDIF
+ALLOCATE(this%buff1(this%nmaxio), this%buff2(this%nmaxio))
+
+END SUBROUTINE nnet_t_init
+
+
+SUBROUTINE layer_t_init(this, next, unit, deffile)
+CLASS(layer_t),INTENT(out) :: this
+TYPE(layer_t),POINTER,OPTIONAL :: next
+INTEGER,INTENT(in),OPTIONAL :: unit
 CHARACTER(len=*),INTENT(in),OPTIONAL :: deffile
 
-INTEGER :: lunit, lvers
+INTEGER :: lvers, ierr
 
-IF (PRESENT(namlfile) .OR. PRESENT(unit)) THEN
+IF (PRESENT(next)) THEN
+  ALLOCATE(this%next)
+  next => this%next
+ENDIF
+IF (PRESENT(unit)) THEN
   ninp=-1; nout=-1; ninconn=-1
-  IF (PRESENT(namlfile)) THEN
-    OPEN(10, file=namlfile)
-    lunit = 10
-  ELSE
-    lunit = unit
-  ENDIF
 
-  READ(lunit, nml=layer_def)
+  READ(unit, nml=layer_def, iostat=ierr)
   IF (nout <=0) THEN
     CALL pflow_error('nout must be >0 for each layer')
   ENDIF
@@ -66,8 +113,6 @@ IF (PRESENT(namlfile) .OR. PRESENT(unit)) THEN
   this%w(:,:) = 1.0_wp/this%ninconn
   this%b(:) = 0.0_wp
   CALL def_limits()
-
-  IF (.NOT.PRESENT(unit)) CLOSE(lunit)
 
 ELSE IF (PRESENT(deffile)) THEN
   OPEN(10, file=deffile, form='formatted')
@@ -96,6 +141,24 @@ ENDIF
 END SUBROUTINE def_limits
 END SUBROUTINE layer_t_init
 
+
+SUBROUTINE nnet_t_compute(this, in, out)
+CLASS(nnet_t),INTENT(in) :: this
+REAL(kind=wp),INTENT(in) :: in(:)
+REAL(kind=wp),INTENT(out) :: out(:)
+
+TYPE(layer_t), POINTER :: curr
+REAL(kind=wp),POINTER :: pin(:)
+REAL(kind=wp),POINTER :: pout
+
+curr => this%firstlayer
+
+CALL curr%compute(in, this%buff1)
+
+DO WHILE(ASSOCIATED(curr))
+  
+END DO
+END SUBROUTINE nnet_t_compute
 
 SUBROUTINE layer_t_compute(this, in, out)
 CLASS(layer_t),INTENT(in) :: this
