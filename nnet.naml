@@ -1,0 +1,17 @@
+&nnet_def
+nlayer = 3
+/
+&layer_def
+ninp = 8,
+nout = 12,
+ninconn = 8
+/
+&layer_def
+ninp = 12,
+nout = 8,
+ninconn = 10
+/
+&layer_def
+ninp = 8,
+nout = 2,
+/

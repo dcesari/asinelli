@@ -1,5 +1,0 @@
-&layer_def
-ninp = 8,
-nout = 5,
-ninconn = 6
-/

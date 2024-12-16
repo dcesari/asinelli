@@ -29,16 +29,16 @@ TYPE nnet_t
   PRIVATE
   TYPE(layer_t),POINTER :: firstlayer=>NULL()
   INTEGER,PUBLIC :: nlayer=0, nmaxio=0, ninp=0, nout=0
-  REAL(kind=wp),ALLOCATABLE ::  buff1(:), buff2(:)
+  REAL(kind=wp),POINTER ::  buff1(:), buff2(:)
   CONTAINS
   GENERIC :: init=>nnet_t_init
   PROCEDURE,PRIVATE :: nnet_t_init
-!  GENERIC :: compute=>nnet_t_compute
-!  PROCEDURE,PRIVATE :: nnet_t_compute
+  GENERIC :: compute=>nnet_t_compute
+  PROCEDURE,PRIVATE :: nnet_t_compute
 !  GENERIC :: display=>nnet_t_display
 !  PROCEDURE,PRIVATE :: nnet_t_display
-!  GENERIC :: write_to_file=>nnet_t_write_to_file
-!  PROCEDURE,PRIVATE :: nnet_t_write_to_file
+  GENERIC :: write_to_file=>nnet_t_write_to_file
+  PROCEDURE,PRIVATE :: nnet_t_write_to_file
 END TYPE nnet_t
 
 INTEGER :: nlayer
@@ -46,22 +46,23 @@ NAMELIST/nnet_def/nlayer
 
 CONTAINS
 
-SUBROUTINE nnet_t_init(this, next, unit)
+SUBROUTINE nnet_t_init(this, unit, defunit)
 CLASS(nnet_t),INTENT(out) :: this
 INTEGER,INTENT(in),OPTIONAL :: unit
+INTEGER,INTENT(in),OPTIONAL :: defunit
 
 TYPE(layer_t),POINTER :: curr, next
-INTEGER :: i, ierr
+INTEGER :: i, lvers, ierr
 
 IF (PRESENT(unit)) THEN
-  READ(unit, nml=nnet_def, iostat=ierr)
+  READ(unit, nml=nnet_def) !, iostat=ierr)
   ALLOCATE(this%firstlayer)
 
   this%nlayer = nlayer
   curr => this%firstlayer
   DO i = 1, nlayer
     IF (i == 1) THEN
-      thix%nin = curr%nin
+      this%ninp = curr%ninp
     ENDIF
     IF (i < nlayer) THEN
       CALL curr%init(next, unit=unit)
@@ -69,23 +70,37 @@ IF (PRESENT(unit)) THEN
       CALL curr%init(unit=unit)
       this%nout = curr%nout
     ENDIF
-    IF (.NOT.ASSOCIATED(next)) THEN
-      CALL pflow_error('nnet_init: end of file reading layer namelist')
+!    IF (.NOT.ASSOCIATED(next)) THEN
+!      CALL pflow_error('nnet_init: end of file reading layer namelist')
+!    ENDIF
+    IF (i > 1 .OR. i < nlayer) THEN ! probably useless optimization
+      this%nmaxio = MAX(this%nmaxio, curr%ninp, curr%nout)
     ENDIF
-    this%nmaxio = MAX(this%nmaxio, curr%ninp, curr%nout)
     curr => next
   ENDDO
+ELSE IF (PRESENT(defunit)) THEN
+  READ(defunit,*) lvers,this%nlayer,this%nmaxio,this%ninp,this%nout
+
+  DO i = 1, this%nlayer
+    IF (i < this%nlayer) THEN
+      CALL curr%init(next, defunit=defunit)
+    ELSE
+      CALL curr%init(defunit=defunit)
+    ENDIF
+    curr => next
+  ENDDO
+
 ENDIF
 ALLOCATE(this%buff1(this%nmaxio), this%buff2(this%nmaxio))
 
 END SUBROUTINE nnet_t_init
 
 
-SUBROUTINE layer_t_init(this, next, unit, deffile)
+SUBROUTINE layer_t_init(this, next, unit, defunit)
 CLASS(layer_t),INTENT(out) :: this
 TYPE(layer_t),POINTER,OPTIONAL :: next
 INTEGER,INTENT(in),OPTIONAL :: unit
-CHARACTER(len=*),INTENT(in),OPTIONAL :: deffile
+INTEGER,INTENT(in),OPTIONAL :: defunit
 
 INTEGER :: lvers, ierr
 
@@ -96,7 +111,8 @@ ENDIF
 IF (PRESENT(unit)) THEN
   ninp=-1; nout=-1; ninconn=-1
 
-  READ(unit, nml=layer_def, iostat=ierr)
+  READ(unit, nml=layer_def) !, iostat=ierr)
+  
   IF (nout <=0) THEN
     CALL pflow_error('nout must be >0 for each layer')
   ENDIF
@@ -114,12 +130,10 @@ IF (PRESENT(unit)) THEN
   this%b(:) = 0.0_wp
   CALL def_limits()
 
-ELSE IF (PRESENT(deffile)) THEN
-  OPEN(10, file=deffile, form='formatted')
-  READ(10,*) lvers,this%nout,this%ninp,this%ninconn
+ELSE IF (PRESENT(defunit)) THEN
+  READ(defunit,*) lvers,this%nout,this%ninp,this%ninconn
   ALLOCATE(this%w(this%nout, this%ninconn), this%b(this%nout))
-  READ(10,*) this%w,this%b
-  CLOSE(10)
+  READ(defunit,*) this%w,this%b
   CALL def_limits()
 
 ENDIF
@@ -149,16 +163,36 @@ REAL(kind=wp),INTENT(out) :: out(:)
 
 TYPE(layer_t), POINTER :: curr
 REAL(kind=wp),POINTER :: pin(:)
-REAL(kind=wp),POINTER :: pout
+REAL(kind=wp),POINTER :: pout(:)
+INTEGER :: i
 
-curr => this%firstlayer
+IF (this%nlayer == 1) THEN ! improbable case
+  CALL this%firstlayer%compute(in, out)
+  RETURN
+ENDIF
 
-CALL curr%compute(in, this%buff1)
+CALL this%firstlayer%compute(in, this%buff1)
 
-DO WHILE(ASSOCIATED(curr))
-  
-END DO
+pin => this%buff1
+pout => this%buff2
+curr => this%firstlayer%next
+
+DO i = 2, this%nlayer - 1
+  CALL curr%compute(pin, pout)
+  curr => curr%next
+  IF (MOD(i, 2) == 0) THEN
+    pin => this%buff2
+    pout => this%buff1
+  ELSE
+    pin => this%buff1
+    pout => this%buff2
+  ENDIF
+ENDDO
+
+CALL curr%compute(pin, out)
+
 END SUBROUTINE nnet_t_compute
+
 
 SUBROUTINE layer_t_compute(this, in, out)
 CLASS(layer_t),INTENT(in) :: this
@@ -196,15 +230,31 @@ PRINT*,this%ninp, this%nout, this%ninconn
 END SUBROUTINE layer_t_display
 
 
-SUBROUTINE layer_t_write_to_file(this, deffile)
-CLASS(layer_t),INTENT(in) :: this
-CHARACTER(len=*),INTENT(in) :: deffile
+SUBROUTINE nnet_t_write_to_file(this, defunit)
+CLASS(nnet_t),INTENT(in) :: this
+INTEGER,INTENT(in) :: defunit
 
-OPEN(10, file=deffile, form='formatted')
-WRITE(10,*) vers,this%nout,this%ninp,this%ninconn
-IF (ALLOCATED(this%w)) WRITE(10,*) this%w,this%b
-IF (ALLOCATED(this%inconnstart)) WRITE(10,*) this%inconnstart,this%inconnend
-CLOSE(10)
+TYPE(layer_t),POINTER :: curr
+
+WRITE(defunit,*) vers,this%nlayer,this%nmaxio,this%ninp,this%nout
+
+curr => this%firstlayer
+
+DO WHILE(ASSOCIATED(curr))
+  CALL curr%write_to_file(defunit)
+  curr => curr%next
+ENDDO
+
+END SUBROUTINE nnet_t_write_to_file
+
+
+SUBROUTINE layer_t_write_to_file(this, defunit)
+CLASS(layer_t),INTENT(in) :: this
+INTEGER,INTENT(in) :: defunit
+
+WRITE(defunit,*) vers,this%nout,this%ninp,this%ninconn
+IF (ALLOCATED(this%w)) WRITE(defunit,*) this%w,this%b
+IF (ALLOCATED(this%inconnstart)) WRITE(defunit,*) this%inconnstart,this%inconnend
 
 END SUBROUTINE layer_t_write_to_file
 

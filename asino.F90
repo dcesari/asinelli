@@ -2,11 +2,13 @@ PROGRAM asino
 USE asinelli
 IMPLICIT NONE
 
-TYPE(layer_t) :: layer
+TYPE(nnet_t) :: nnet
 
-OPEN(10, file='layer.naml')
-CALL layer%init(unit=10)
+OPEN(10, file='nnet.naml')
+CALL nnet%init(unit=10)
+CLOSE(10)
 
-CALL layer%write_to_file('layer.out')
+OPEN(10, file='nnet.out')
+CALL nnet%write_to_file(10)
 
 END PROGRAM asino
