@@ -5,8 +5,8 @@ INTEGER,PARAMETER :: wp=KIND(1.0), vers=1
 
 TYPE layer_t
   PRIVATE
-  TYPE(layer_t),POINTER,PUBLIC :: next=>NULL()
-  INTEGER,PUBLIC :: ninp=0, nout=0, ninconn=0
+  TYPE(layer_t),POINTER :: next=>NULL()
+  INTEGER :: ninp=0, nout=0, ninconn=0
   REAL(kind=wp),ALLOCATABLE :: w(:,:), b(:)
   INTEGER,ALLOCATABLE :: inconnstart(:), inconnend(:)
   CONTAINS
